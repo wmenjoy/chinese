@@ -25,6 +25,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=2,
         help="JSON indentation (defaults to 2). Use 0 for compact output.",
     )
+    parser.add_argument(
+        "--database",
+        dest="database_path",
+        help="Optional path to an SQLite database used to store the collected results.",
+    )
     return parser
 
 
@@ -33,7 +38,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        data = collect_character_data(args.character, sources=args.sources)
+        data = collect_character_data(
+            args.character,
+            sources=args.sources,
+            database_path=args.database_path,
+        )
     except Exception as exc:  # pragma: no cover - CLI convenience
         parser.error(str(exc))
         return 1

@@ -6,6 +6,7 @@ from typing import Dict, Iterable, Optional
 
 from .scraper import cjkv, cuhk, hanziyuan
 from .scraper.utils import create_session
+from .storage import store_results
 
 
 AVAILABLE_SOURCES = {
@@ -20,6 +21,7 @@ def collect_character_data(
     *,
     sources: Optional[Iterable[str]] = None,
     session=None,
+    database_path: Optional[str] = None,
 ) -> Dict[str, Dict[str, object]]:
     """Collect data for *character* from the requested *sources*.
 
@@ -34,6 +36,9 @@ def collect_character_data(
         Optional :class:`requests.Session` (or session-like object) which will be
         re-used by all scrapers.  When omitted a new session with sensible
         defaults is created.
+    database_path:
+        Optional path to an SQLite database. When supplied, the collected
+        results are persisted via :func:`hanzi_mcp.storage.store_results`.
     """
 
     if not character or len(character) != 1:
@@ -54,4 +59,8 @@ def collect_character_data(
             results[source] = fetcher(character, session=session)
         except Exception as exc:  # pragma: no cover - defensive
             results[source] = {"error": str(exc)}
+
+    if database_path:
+        store_results(database_path, character, results)
+
     return results

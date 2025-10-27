@@ -54,6 +54,7 @@ python -m hanzi_mcp.cli 金
 The command prints a JSON document containing the normalised output from all
 three sources.  The CLI accepts a `--source` flag if you only want one of the
 scrapers to run, e.g. `python -m hanzi_mcp.cli 金 --source cuhk`.
+You can additionally persist the results by supplying `--database path/to/db.sqlite`.
 
 Within Python the high level API looks like this:
 
@@ -75,6 +76,14 @@ The `result` dictionary returned by `collect_character_data` uses the source
 identifier as the top-level key (`cuhk`, `hanziyuan`, `cjkv`).  Each scraper
 returns structured data (maps, lists, and simple strings) that can be serialised
 as JSON straight away.
+
+### Persisting to SQLite
+
+If you provide the optional `database_path` argument, the aggregated payload is
+stored inside an SQLite database.  The helper keeps the schema extremely simple:
+`results(character, source, fetched_at, payload)`.  Consecutive scrapes update
+the stored JSON blob, allowing downstream tooling to reuse the cached data even
+when the remote sites are temporarily unavailable.
 
 ## Caching / rate limits
 

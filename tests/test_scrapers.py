@@ -2,7 +2,7 @@
 
 from bs4 import BeautifulSoup
 
-from hanzi_mcp.scraper import cuhk, hanziyuan
+from hanzi_mcp.scraper import cjkv, cuhk, hanziyuan
 
 
 def make_soup(html: str) -> BeautifulSoup:
@@ -115,3 +115,28 @@ def test_hanziyuan_collect_section_content_normalises_items():
             {"id": "B19066", "text": "Another"},
         ],
     }
+
+
+def test_cjkv_extract_sections_handles_nested_columns():
+    html = """
+    <div class="row info main">
+      <div class="tab-pane active">
+        <div class="col-md-6">
+          <p class="title">讀音</p>
+          <p>拼音 jīn</p>
+          <p>粵語 gam1</p>
+        </div>
+        <div class="col-md-6">
+          <p class="title">部首</p>
+          <p>金</p>
+        </div>
+      </div>
+    </div>
+    """
+    soup = make_soup(html)
+    pane = soup.select_one("div.tab-pane")
+    sections = cjkv._extract_sections(pane)
+    assert sections == [
+        {"title": "讀音", "values": ["拼音 jīn", "粵語 gam1"]},
+        {"title": "部首", "values": ["金"]},
+    ]

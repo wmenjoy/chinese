@@ -1,6 +1,10 @@
-"""Unit tests for utility helpers."""
+"""Unit tests for utility helpers and aggregator persistence."""
 
+from pathlib import Path
+
+from hanzi_mcp import aggregator
 from hanzi_mcp.scraper.utils import assign_value, collapse_table_dict
+from hanzi_mcp.storage import load_results
 
 
 def test_assign_value_promotes_to_list():
@@ -28,3 +32,21 @@ def test_collapse_table_dict_handles_single_and_ab_pairs():
         "頻序": {"A": "280", "B": "371"},
         "四角號碼": "8010.9",
     }
+
+
+def test_collect_character_data_can_persist_results(tmp_path: Path):
+    database = tmp_path / "results.db"
+    original_sources = aggregator.AVAILABLE_SOURCES.copy()
+    try:
+        aggregator.AVAILABLE_SOURCES = {"mock": lambda char, session=None: {"echo": char}}
+        results = aggregator.collect_character_data(
+            "金",
+            sources=["mock"],
+            database_path=str(database),
+        )
+    finally:
+        aggregator.AVAILABLE_SOURCES = original_sources
+
+    assert results == {"mock": {"echo": "金"}}
+    stored = load_results(str(database), "金")
+    assert stored == results
