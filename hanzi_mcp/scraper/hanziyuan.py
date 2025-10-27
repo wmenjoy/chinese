@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import re
 from typing import Dict, List, Tuple
 
 from bs4 import BeautifulSoup
 
-from .utils import create_session, node_text
+from .utils import assign_value, create_session, node_text
 
 INDEX_URL = "https://hanziyuan.net/"
 QUERY_URL = "https://hanziyuan.net/Etymology"
+
+SUMMARY_RE = re.compile(
+    r"Found\s+(?P<etymologies>\d+)\s+etymologies\s+and\s+(?P<characters>\d+)\s+characters\s+in\s+(?P<seconds>[0-9.]+)"
+)
+ITEM_ID_RE = re.compile(r"^[A-Z][0-9A-Z]+$")
 
 
 def _ensure_tokens(session) -> Tuple[str, str]:
@@ -22,57 +28,91 @@ def _ensure_tokens(session) -> Tuple[str, str]:
     return bronze, oracle
 
 
+def _structure_item_value(value: str) -> Dict[str, str]:
+    parts = value.split()
+    if parts and ITEM_ID_RE.match(parts[0]):
+        remainder = " ".join(parts[1:]).strip()
+        data = {"id": parts[0]}
+        if remainder and remainder != parts[0]:
+            data["text"] = remainder
+        return data
+    return {"text": value}
+
+
 def _parse_summary(soup: BeautifulSoup) -> Dict[str, object]:
     summary_block = soup.select_one(".etymology-alert")
     if not summary_block:
         return {}
+
+    content_text = node_text(summary_block) or ""
+
+    result: Dict[str, object] = {"text": content_text}
+
     summary_label = summary_block.find("strong")
     label_text = node_text(summary_label)
-    label = None
     if label_text:
-        label = label_text.strip(" :")
-    counts = [node_text(span) for span in summary_block.select("span.label")]
-    return {
-        "character": label,
-        "text": node_text(summary_block),
-        "labels": [count for count in counts if count],
-    }
+        result["character"] = label_text.strip(" :")
+
+    match = SUMMARY_RE.search(content_text)
+    if match:
+        result["counts"] = {
+            "etymologies": int(match.group("etymologies")),
+            "characters": int(match.group("characters")),
+        }
+        result["elapsed_seconds"] = float(match.group("seconds"))
+
+    badges = []
+    for span in summary_block.select("span.label"):
+        label = node_text(span)
+        if label:
+            badges.append(_structure_item_value(label))
+    if badges:
+        result["identifiers"] = badges
+
+    return result
 
 
-def _parse_left_column(column) -> List[Dict[str, str]]:
-    entries: List[Dict[str, str]] = []
+def _parse_left_column(column) -> Dict[str, object]:
+    metadata: Dict[str, object] = {}
     if not column:
-        return entries
+        return metadata
+
+    notes: List[str] = []
     for paragraph in column.find_all("p"):
         label_tag = paragraph.find("b")
         label = node_text(label_tag).rstrip(":") if label_tag else None
         if label_tag:
             label_tag.extract()
         value = node_text(paragraph)
-        if not value and not label:
+        if not value:
             continue
-        entries.append({"label": label, "value": value or ""})
-    return entries
+        if label:
+            assign_value(metadata, label, value)
+        else:
+            notes.append(value)
+    if notes:
+        metadata["notes"] = notes
+    return metadata
 
 
 def _collect_section_content(heading) -> Dict[str, object]:
     title = node_text(heading) or ""
-    items: List[str] = []
+    items: List[Dict[str, str]] = []
     pointer = heading.find_next_sibling()
     while pointer and pointer.name in {"p", "ul", "pre", "div", "ol"}:
-        if pointer.name == "ul" or pointer.name == "ol":
+        if pointer.name in {"ul", "ol"}:
             for item in pointer.find_all("li"):
                 text = node_text(item)
                 if text:
-                    items.append(text)
+                    items.append(_structure_item_value(text))
         elif pointer.name == "div" and "row" in pointer.get("class", []):
             text = node_text(pointer)
             if text:
-                items.append(text)
+                items.append(_structure_item_value(text))
         else:
             text = node_text(pointer)
             if text:
-                items.append(text)
+                items.append(_structure_item_value(text))
         pointer = pointer.find_next_sibling()
         if pointer and pointer.name == "h3":
             break
@@ -106,20 +146,34 @@ def fetch_hanziyuan_data(character: str, *, session=None) -> Dict[str, object]:
 
     soup = BeautifulSoup(response.text, "lxml")
 
-    result: Dict[str, object] = {
-        "character": character,
-        "summary": _parse_summary(soup),
-        "entries": [],
-    }
+    result: Dict[str, object] = {"character": character}
 
+    summary = _parse_summary(soup)
+    if summary:
+        result["summary"] = summary
+
+    etymologies: List[Dict[str, object]] = []
     for row in soup.select("div.row.mx-0.bg-info.row-eq-height.border-top.border-purple"):
         left = row.select_one(".col-md-3")
         right = row.select_one(".col-md-9")
-        result["entries"].append(
-            {
-                "id": row.get("id"),
-                "metadata": _parse_left_column(left),
-                "sections": _parse_right_column(right),
-            }
-        )
+
+        entry: Dict[str, object] = {}
+        row_id = row.get("id")
+        if row_id:
+            entry["id"] = row_id
+
+        metadata = _parse_left_column(left)
+        if metadata:
+            entry["metadata"] = metadata
+
+        sections = _parse_right_column(right)
+        if sections:
+            entry["sections"] = sections
+
+        if entry:
+            etymologies.append(entry)
+
+    if etymologies:
+        result["etymologies"] = etymologies
+
     return result

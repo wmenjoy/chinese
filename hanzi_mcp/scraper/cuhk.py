@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from bs4 import BeautifulSoup
 
 from .utils import (
+    assign_value,
+    collapse_table_dict,
     create_session,
     node_text,
     options_to_links,
@@ -16,13 +18,15 @@ from .utils import (
 BASE_URL = "https://humanum.arts.cuhk.edu.hk/Lexis/lexi-mf/search.php"
 
 
-def _parse_basic_tables(soup: BeautifulSoup) -> Dict[str, Dict[str, List[str]]]:
-    sections: Dict[str, Dict[str, List[str]]] = {}
-    columns = soup.select(".char_info2_col .char_info_table")
-    labels = ("codes", "usage")
-    for label, table in zip(labels, columns):
-        sections[label] = table_to_dict(table)
-    return sections
+def _parse_basic_sections(soup: BeautifulSoup) -> Tuple[Dict[str, object], Dict[str, object]]:
+    identifiers: Dict[str, object] = {}
+    statistics: Dict[str, object] = {}
+    tables = soup.select(".char_info2_col .char_info_table")
+    if tables:
+        identifiers = collapse_table_dict(table_to_dict(tables[0]))
+        if len(tables) > 1:
+            statistics = collapse_table_dict(table_to_dict(tables[1]))
+    return identifiers, statistics
 
 
 def _parse_forms(soup: BeautifulSoup) -> Dict[str, Optional[str]]:
@@ -62,29 +66,37 @@ def _parse_shuowen(soup: BeautifulSoup) -> Dict[str, str]:
     return data
 
 
-def _parse_cantonese_table(soup: BeautifulSoup) -> List[Dict[str, str]]:
+def _parse_cantonese_table(soup: BeautifulSoup) -> List[Dict[str, object]]:
     table = soup.find("table", id="char_can_table")
     if not table:
         return []
     rows = table.find_all("tr")
-    if not rows:
+    if len(rows) < 2:
         return []
     headers = [node_text(th) or "" for th in rows[0].find_all("th")]
-    entries: List[Dict[str, str]] = []
+    entries: List[Dict[str, object]] = []
     for row in rows[1:]:
         cells = [node_text(td) or "" for td in row.find_all("td")]
         if not any(cells):
             continue
-        entry = {headers[idx]: value for idx, value in enumerate(cells) if headers[idx]}
-        entries.append(entry)
+        entry: Dict[str, object] = {}
+        for idx, header in enumerate(headers):
+            if not header:
+                continue
+            value = cells[idx] if idx < len(cells) else ""
+            if not value:
+                continue
+            assign_value(entry, header, value)
+        if entry:
+            entries.append(entry)
     return entries
 
 
-def _parse_english_gloss(soup: BeautifulSoup) -> Dict[str, str]:
+def _parse_english_gloss(soup: BeautifulSoup) -> Dict[str, object]:
     table = soup.find("table", id="char_eng_table")
     if not table:
         return {}
-    return {label: " ".join(values) for label, values in table_to_dict(table).items()}
+    return collapse_table_dict(table_to_dict(table))
 
 
 def _parse_dictionary_links(soup: BeautifulSoup) -> List[Dict[str, str]]:
@@ -96,27 +108,31 @@ def _parse_dictionary_links(soup: BeautifulSoup) -> List[Dict[str, str]]:
 
 def _parse_misc_sections(soup: BeautifulSoup) -> Dict[str, object]:
     data: Dict[str, object] = {}
-    sections = {
-        "dialects": soup.find("table", id="dialectTable"),
-        "related": soup.find("table", id="char_rel_table"),
-    }
-    for key, table in sections.items():
-        if not table:
-            continue
-        values = {
-            label: " ".join(entries)
-            for label, entries in table_to_dict(table).items()
-            if entries
-        }
-        if values:
-            data[key] = values
+
+    dialect_table = soup.find("table", id="dialectTable")
+    if dialect_table:
+        dialect_values = collapse_table_dict(table_to_dict(dialect_table))
+        if dialect_values:
+            data["dialect_notes"] = dialect_values
+
+    related_table = soup.find("table", id="char_rel_table")
+    if related_table:
+        related_entries = []
+        for label, values in table_to_dict(related_table).items():
+            if not values:
+                continue
+            related_entries.append({"label": label, "values": values})
+        if related_entries:
+            data["related_characters"] = related_entries
+
     admin = soup.find("table", id="char_admin_table")
     if admin:
         admin_text = " ".join(
             filter(None, (node_text(cell) for cell in admin.find_all("td")))
         )
         if admin_text:
-            data["admin"] = admin_text
+            data["administrative_notes"] = admin_text
+
     return data
 
 
@@ -132,21 +148,40 @@ def fetch_cuhk_data(character: str, *, session=None) -> Dict[str, object]:
     soup = BeautifulSoup(response.text, "lxml")
     head_char = node_text(soup.select_one("#char_headchar"))
 
+    identifiers, statistics = _parse_basic_sections(soup)
+
     result: Dict[str, object] = {
         "character": head_char or character,
         "title": node_text(soup.title),
-        "links": _parse_dictionary_links(soup),
-        "forms": _parse_forms(soup),
     }
 
-    result["sections"] = {
-        "basic": _parse_basic_tables(soup),
-        "shuowen": _parse_shuowen(soup),
-        "cantonese": _parse_cantonese_table(soup),
-        "english": _parse_english_gloss(soup),
-    }
+    links = _parse_dictionary_links(soup)
+    if links:
+        result["external_links"] = links
+
+    forms = _parse_forms(soup)
+    if forms:
+        result["forms"] = forms
+
+    if identifiers:
+        result["identifiers"] = identifiers
+    if statistics:
+        result["statistics"] = statistics
+
+    shuowen = _parse_shuowen(soup)
+    if shuowen:
+        result["shuowen"] = shuowen
+
+    cantonese = _parse_cantonese_table(soup)
+    if cantonese:
+        result["cantonese_readings"] = cantonese
+
+    english = _parse_english_gloss(soup)
+    if english:
+        result["english_definitions"] = english
+
     misc = _parse_misc_sections(soup)
     if misc:
-        result["sections"].update(misc)
+        result.update(misc)
 
     return result

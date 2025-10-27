@@ -73,3 +73,39 @@ def options_to_links(select: Tag) -> List[Dict[str, str]]:
 
 def safe_find(soup: BeautifulSoup, selector: str) -> Optional[Tag]:
     return soup.select_one(selector)
+
+
+def assign_value(mapping: Dict[str, object], key: str, value: object) -> None:
+    """Assign a value to *mapping* keeping duplicate keys as lists."""
+
+    if key in mapping:
+        current = mapping[key]
+        if isinstance(current, list):
+            current.append(value)
+        else:
+            mapping[key] = [current, value]
+    else:
+        mapping[key] = value
+
+
+def collapse_table_dict(table_map: Dict[str, List[str]]) -> Dict[str, object]:
+    """Collapse list based table data into friendlier scalars."""
+
+    collapsed: Dict[str, object] = {}
+    for label, values in table_map.items():
+        if not values:
+            continue
+        cleaned = [value for value in values if value]
+        if not cleaned:
+            continue
+        if label.endswith("A/B") and len(cleaned) == 2:
+            assign_value(
+                collapsed,
+                label[:-3].strip(),
+                {"A": cleaned[0], "B": cleaned[1]},
+            )
+        elif len(cleaned) == 1:
+            assign_value(collapsed, label, cleaned[0])
+        else:
+            assign_value(collapsed, label, cleaned)
+    return collapsed
