@@ -50,3 +50,37 @@ def test_collect_character_data_can_persist_results(tmp_path: Path):
     assert results == {"mock": {"echo": "金"}}
     stored = load_results(str(database), "金")
     assert stored == results
+
+
+def test_collect_character_data_uses_cache_when_available(tmp_path: Path):
+    database = tmp_path / "results.db"
+    original_sources = aggregator.AVAILABLE_SOURCES.copy()
+    call_count = {"value": 0}
+
+    def mock_fetch(char: str, session=None):
+        call_count["value"] += 1
+        return {"count": call_count["value"]}
+
+    def should_not_run(*_args, **_kwargs):  # pragma: no cover - defensive
+        raise AssertionError("Fetcher should not be called when cache is valid")
+
+    cached = None
+    try:
+        aggregator.AVAILABLE_SOURCES = {"mock": mock_fetch}
+        first = aggregator.collect_character_data(
+            "金",
+            sources=["mock"],
+            database_path=str(database),
+        )
+        assert first == {"mock": {"count": 1}}
+
+        aggregator.AVAILABLE_SOURCES = {"mock": should_not_run}
+        cached = aggregator.collect_character_data(
+            "金",
+            sources=["mock"],
+            database_path=str(database),
+        )
+    finally:
+        aggregator.AVAILABLE_SOURCES = original_sources
+
+    assert cached == {"mock": {"count": 1}}

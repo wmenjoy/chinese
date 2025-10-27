@@ -6,7 +6,7 @@ from typing import Dict, Iterable, Optional
 
 from .scraper import cjkv, cuhk, hanziyuan
 from .scraper.utils import create_session
-from .storage import store_results
+from .storage import load_cached_results, store_results
 
 
 AVAILABLE_SOURCES = {
@@ -22,6 +22,7 @@ def collect_character_data(
     sources: Optional[Iterable[str]] = None,
     session=None,
     database_path: Optional[str] = None,
+    cache_ttl_seconds: Optional[int] = None,
 ) -> Dict[str, Dict[str, object]]:
     """Collect data for *character* from the requested *sources*.
 
@@ -39,6 +40,10 @@ def collect_character_data(
     database_path:
         Optional path to an SQLite database. When supplied, the collected
         results are persisted via :func:`hanzi_mcp.storage.store_results`.
+    cache_ttl_seconds:
+        Optional time-to-live (in seconds) for cached entries. When specified, a
+        cached result older than this value is considered stale and will be
+        refreshed from the remote source.
     """
 
     if not character or len(character) != 1:
@@ -48,19 +53,36 @@ def collect_character_data(
         session = create_session()
 
     requested_sources = list(sources) if sources is not None else list(AVAILABLE_SOURCES)
+    requested_sources = list(dict.fromkeys(requested_sources))
     invalid = [source for source in requested_sources if source not in AVAILABLE_SOURCES]
     if invalid:
         raise ValueError(f"Unknown sources requested: {', '.join(sorted(invalid))}")
 
     results: Dict[str, Dict[str, object]] = {}
-    for source in requested_sources:
+    missing_sources = requested_sources
+
+    if database_path:
+        cached, missing = load_cached_results(
+            database_path,
+            character,
+            requested_sources,
+            max_age_seconds=cache_ttl_seconds,
+        )
+        results.update(cached)
+        missing_sources = missing
+
+    for source in missing_sources:
         fetcher = AVAILABLE_SOURCES[source]
         try:
             results[source] = fetcher(character, session=session)
         except Exception as exc:  # pragma: no cover - defensive
             results[source] = {"error": str(exc)}
 
-    if database_path:
-        store_results(database_path, character, results)
+    if database_path and missing_sources:
+        store_results(
+            database_path,
+            character,
+            {source: results[source] for source in missing_sources},
+        )
 
     return results

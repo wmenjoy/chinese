@@ -30,6 +30,12 @@ def build_parser() -> argparse.ArgumentParser:
         dest="database_path",
         help="Optional path to an SQLite database used to store the collected results.",
     )
+    parser.add_argument(
+        "--cache-ttl",
+        type=int,
+        dest="cache_ttl_seconds",
+        help="Optional cache TTL in seconds. Cached entries older than this value will be refreshed.",
+    )
     return parser
 
 
@@ -42,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
             args.character,
             sources=args.sources,
             database_path=args.database_path,
+            cache_ttl_seconds=args.cache_ttl_seconds,
         )
     except Exception as exc:  # pragma: no cover - CLI convenience
         parser.error(str(exc))

@@ -55,6 +55,8 @@ The command prints a JSON document containing the normalised output from all
 three sources.  The CLI accepts a `--source` flag if you only want one of the
 scrapers to run, e.g. `python -m hanzi_mcp.cli 金 --source cuhk`.
 You can additionally persist the results by supplying `--database path/to/db.sqlite`.
+To control cache freshness, pass `--cache-ttl <seconds>`; cached entries older
+than the specified age will be re-fetched automatically.
 
 Within Python the high level API looks like this:
 
